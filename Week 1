@@ -1,3 +1,28 @@
+"""
+WHAT THIS SCRIPT DOES:
+1. Looks in the 'csv' folder for all CRMLSListing and CRMLSSold monthly files
+   from January 2024 through the most recently completed calendar month.
+2. Concatenates each set of monthly files into one combined Listing dataset
+   and one combined Sold dataset.
+3. Filters both combined datasets down to PropertyType == 'Residential' only.
+4. Saves the two filtered datasets as new CSV files.
+5. Prints row counts before/after concatenation and before/after the
+   Residential filter, as required by the Week 1 deliverable.
+
+NOTE ON DUPLICATE COLUMNS:
+The Trestle API pull script (crmls_listed.py) requests several fields more
+than once in its $select statement (e.g. PropertyType, Latitude, CloseDate).
+When pandas reads a CSV with repeated header names, it automatically renames
+the repeats with a ".1", ".2" suffix (e.g. PropertyType, PropertyType.1).
+This script drops those duplicate columns after reading each file so we are
+left with one clean copy of each field.
+"""
+
+import pandas as pd
+import glob
+import os
+from datetime import date
+
 # ---------------------------------------------------------------------------
 # STEP 1: Build the list of year-month strings we expect data for
 # (January 2024 through the most recently completed calendar month)
@@ -93,16 +118,19 @@ if __name__ == "__main__":
     print("=== Combining LISTING files ===")
     listings = combine_monthly_files("CRMLSListing", csv_folder, year_months)
     listings_before = len(listings)
-
+    # CONFIRMED: Listings had 874,096 rows total after concatenating all monthly files
     print("\n=== Combining SOLD files ===")
     sold = combine_monthly_files("CRMLSSold", csv_folder, year_months)
     sold_before = len(sold)
+    # CONFIRMED: Sold had 569,816 rows total after concatenating all monthly files
 
     # --- Residential filter ---
     print("\n=== Applying PropertyType == 'Residential' filter ===")
     listings_residential = listings[listings["PropertyType"] == "Residential"].copy()
     sold_residential = sold[sold["PropertyType"] == "Residential"].copy()
-
+    # CONFIRMED: Listings went from 874,096 rows -> 557,343 rows after Residential filter
+    # CONFIRMED: Sold went from 569,816 rows -> 384,161 rows after Residential filter
+    
     print(f"Listings: {listings_before} rows before filter -> "
           f"{len(listings_residential)} rows after filter")
     print(f"Sold:     {sold_before} rows before filter -> "
