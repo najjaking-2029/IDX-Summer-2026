@@ -1,22 +1,118 @@
-import pandas as pd
+# ---------------------------------------------------------------------------
+# STEP 1: Build the list of year-month strings we expect data for
+# (January 2024 through the most recently completed calendar month)
+# ---------------------------------------------------------------------------
 
-sold_list = []
+def get_expected_year_months(start_year=2024, start_month=1):
+    """Return a list of 'YYYYMM' strings from Jan 2024 through last completed month."""
+    today = date.today()
+    # The "most recently completed" month is always the month before the current one
+    if today.month == 1:
+        end_year, end_month = today.year - 1, 12
+    else:
+        end_year, end_month = today.year, today.month - 1
 
-for year in range(2024, 2027):
-    for month in range(1, 13):
-        if year == 2026 and month > 4:
-            break
+    year_months = []
+    y, m = start_year, start_month
+    while (y, m) <= (end_year, end_month):
+        year_months.append(f"{y}{m:02d}")
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return year_months
 
-        if year == 2024 and month < 3:
-            continue
 
-        file = f"CRMLSSold{year}{month:02d}.csv"
-        try:
-            df = pd.read_csv(file)
-            sold_list.append(df)
-            print(f"Loaded {file}")
-        except FileNotFoundError:
-            print(f"Missing {file}")
+# ---------------------------------------------------------------------------
+# STEP 2: Helper to load + clean one monthly file (drops duplicate columns)
+# ---------------------------------------------------------------------------
 
-sold = pd.concat(sold_list, ignore_index=True)
-print("Final sold shape:", sold.shape)
+def load_monthly_file(filepath):
+    """Read a single monthly CSV and drop any duplicate columns pandas created."""
+    df = pd.read_csv(filepath, low_memory=False)
+    # Keep only the first occurrence of each column name
+    # (handles fields like PropertyType, PropertyType.1, PropertyType.2, ...)
+    base_names = [col.split('.')[0] for col in df.columns]
+    df.columns = base_names
+    df = df.loc[:, ~df.columns.duplicated()]
+    return df
+
+
+# ---------------------------------------------------------------------------
+# STEP 3: Combine all available monthly files of a given type (Listing/Sold)
+# ---------------------------------------------------------------------------
+
+def combine_monthly_files(prefix, csv_folder, year_months):
+    """
+    Concatenate all monthly files for the given prefix ('CRMLSListing' or
+    'CRMLSSold') that exist in csv_folder. Prints which expected months are
+    missing so the intern knows what still needs to be pulled from the FTP
+    or the extraction script.
+    """
+    frames = []
+    row_counts = {}
+    missing_months = []
+
+    for ym in year_months:
+        filepath = os.path.join(csv_folder, f"{prefix}{ym}.csv")
+        if os.path.exists(filepath):
+            monthly_df = load_monthly_file(filepath)
+            row_counts[ym] = len(monthly_df)
+            frames.append(monthly_df)
+        else:
+            missing_months.append(ym)
+
+    if missing_months:
+        print(f"  [!] Missing {prefix} files for: {missing_months}")
+        print("      -> Check the FTP folder first, then run the extraction "
+              "script for any remaining months.")
+
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    print(f"  Row counts by month ({prefix}):")
+    for ym, count in row_counts.items():
+        print(f"    {ym}: {count} rows")
+    print(f"  TOTAL rows after concatenation ({prefix}): {len(combined)}")
+
+    return combined
+
+
+# ---------------------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    csv_folder = "csv"  # folder where the monthly FTP/extraction CSVs live
+    output_folder = "outputs"
+    os.makedirs(output_folder, exist_ok=True)
+
+    year_months = get_expected_year_months()
+    print(f"Expected months (Jan 2024 - most recent completed month): {year_months}\n")
+
+    # --- Listings ---
+    print("=== Combining LISTING files ===")
+    listings = combine_monthly_files("CRMLSListing", csv_folder, year_months)
+    listings_before = len(listings)
+
+    print("\n=== Combining SOLD files ===")
+    sold = combine_monthly_files("CRMLSSold", csv_folder, year_months)
+    sold_before = len(sold)
+
+    # --- Residential filter ---
+    print("\n=== Applying PropertyType == 'Residential' filter ===")
+    listings_residential = listings[listings["PropertyType"] == "Residential"].copy()
+    sold_residential = sold[sold["PropertyType"] == "Residential"].copy()
+
+    print(f"Listings: {listings_before} rows before filter -> "
+          f"{len(listings_residential)} rows after filter")
+    print(f"Sold:     {sold_before} rows before filter -> "
+          f"{len(sold_residential)} rows after filter")
+
+    # --- Save outputs ---
+    listings_out = os.path.join(output_folder, "combined_listings_residential.csv")
+    sold_out = os.path.join(output_folder, "combined_sold_residential.csv")
+    listings_residential.to_csv(listings_out, index=False)
+    sold_residential.to_csv(sold_out, index=False)
+
+    print(f"\nSaved: {listings_out}")
+    print(f"Saved: {sold_out}")
