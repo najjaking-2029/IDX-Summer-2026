@@ -1,0 +1,108 @@
+# ---------------------------------------------------------------------------
+# STEP 1: Load the Week 1 combined datasets
+# ---------------------------------------------------------------------------
+
+def load_dataset(filepath):
+    return pd.read_csv(filepath, low_memory=False)
+
+
+# ---------------------------------------------------------------------------
+# STEP 2: Basic structure summary (rows, columns, dtypes)
+# ---------------------------------------------------------------------------
+
+def print_structure_summary(df, name):
+    print(f"\n=== {name}: Structure Summary ===")
+    print(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
+    print("\nColumn data types:")
+    print(df.dtypes)
+
+
+# ---------------------------------------------------------------------------
+# STEP 3: Missing value analysis (count + percent, flag columns > 90% null)
+# ---------------------------------------------------------------------------
+
+def missing_value_report(df, name):
+    null_counts = df.isnull().sum()
+    null_pct = (null_counts / len(df) * 100).round(2)
+
+    report = pd.DataFrame({
+        "column": df.columns,
+        "null_count": null_counts.values,
+        "null_pct": null_pct.values
+    }).sort_values("null_pct", ascending=False)
+
+    # Flag columns that are more than 90% missing -- these are candidates
+    # to drop, but per the handbook, core fields should be kept even if
+    # partially missing, so this is a flag for review, not an auto-drop.
+    high_missing = report[report["null_pct"] > 90]
+
+    print(f"\n=== {name}: Missing Value Report (top 10 by % missing) ===")
+    print(report.head(10).to_string(index=False))
+
+    if not high_missing.empty:
+        print(f"\n[!] Columns flagged as >90% missing in {name}:")
+        print(high_missing["column"].tolist())
+    else:
+        print(f"\nNo columns in {name} exceed the 90% missing threshold.")
+
+    return report
+
+
+# ---------------------------------------------------------------------------
+# STEP 4: Numeric distribution summary for key fields
+# ---------------------------------------------------------------------------
+
+def numeric_distribution_summary(df, columns, name):
+    summary_rows = []
+    for col in columns:
+        if col not in df.columns:
+            print(f"[!] Column '{col}' not found in {name}, skipping.")
+            continue
+        series = pd.to_numeric(df[col], errors="coerce")  # force numeric, invalid -> NaN
+        summary_rows.append({
+            "column": col,
+            "min": series.min(),
+            "p25": series.quantile(0.25),
+            "median": series.median(),
+            "mean": series.mean(),
+            "p75": series.quantile(0.75),
+            "p95": series.quantile(0.95),
+            "max": series.max(),
+        })
+    summary_df = pd.DataFrame(summary_rows)
+    print(f"\n=== {name}: Numeric Distribution Summary ===")
+    print(summary_df.to_string(index=False))
+    return summary_df
+
+
+# ---------------------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    output_folder = "outputs"
+
+    sold = load_dataset(os.path.join(output_folder, "combined_sold_residential.csv"))
+    listings = load_dataset(os.path.join(output_folder, "combined_listings_residential.csv"))
+
+    # --- Structure ---
+    print_structure_summary(sold, "Sold (Residential)")
+    print_structure_summary(listings, "Listings (Residential)")
+
+    # --- PropertyType check (should be Residential only at this point) ---
+    print("\nUnique PropertyType values in Sold (post-filter, should be 1 value):")
+    print(sold["PropertyType"].unique())
+
+    # --- Missing value analysis ---
+    sold_missing_report = missing_value_report(sold, "Sold")
+    listings_missing_report = missing_value_report(listings, "Listings")
+
+    sold_missing_report.to_csv(os.path.join(output_folder, "sold_missing_value_report.csv"), index=False)
+    listings_missing_report.to_csv(os.path.join(output_folder, "listings_missing_value_report.csv"), index=False)
+
+    # --- Numeric distribution summary ---
+    numeric_fields = ["ClosePrice", "LivingArea", "DaysOnMarket"]
+    sold_numeric_summary = numeric_distribution_summary(sold, numeric_fields, "Sold")
+    sold_numeric_summary.to_csv(os.path.join(output_folder, "sold_numeric_distribution_summary.csv"), index=False)
+
+    print(f"\nSaved missing value reports and numeric distribution summary to '{output_folder}/'")
