@@ -1,0 +1,147 @@
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")  # lets this run without needing a pop-up window
+import matplotlib.pyplot as plt
+import os
+
+# ---------------------------------------------------------------------------
+# STEP 1: Which columns are we analyzing?
+# ---------------------------------------------------------------------------
+# These are exactly the 9 fields the Week 2-3 objective asks for.
+
+NUMERIC_FIELDS = [
+    "ClosePrice",
+    "ListPrice",
+    "OriginalListPrice",
+    "LivingArea",
+    "LotSizeAcres",
+    "BedroomsTotal",
+    "BathroomsTotalInteger",
+    "DaysOnMarket",
+    "YearBuilt",
+]
+
+
+# ---------------------------------------------------------------------------
+# STEP 2: Percentile summary table (same idea as before, more columns)
+# ---------------------------------------------------------------------------
+
+def numeric_distribution_summary(df, columns, name):
+    summary_rows = []
+    for col in columns:
+        if col not in df.columns:
+            print(f"[!] Column '{col}' not found in {name}, skipping.")
+            continue
+        series = pd.to_numeric(df[col], errors="coerce")  # force numeric, bad values -> NaN
+        summary_rows.append({
+            "column": col,
+            "min": series.min(),
+            "p25": series.quantile(0.25),
+            "median": series.median(),
+            "mean": series.mean(),
+            "p75": series.quantile(0.75),
+            "p95": series.quantile(0.95),
+            "max": series.max(),
+        })
+    summary_df = pd.DataFrame(summary_rows)
+    print(f"\n=== {name}: Full Numeric Distribution Summary ===")
+    print(summary_df.to_string(index=False))
+    return summary_df
+
+
+# ---------------------------------------------------------------------------
+# STEP 3: Histograms + boxplots, saved as image files
+# ---------------------------------------------------------------------------
+
+def save_histogram_and_boxplot(df, col, name, output_folder):
+    series = pd.to_numeric(df[col], errors="coerce").dropna()
+    if series.empty:
+        print(f"[!] '{col}' has no usable numeric data in {name}, skipping charts.")
+        return
+
+    # --- Histogram ---
+    plt.figure(figsize=(8, 5))
+    plt.hist(series, bins=50)
+    plt.title(f"{name}: {col} Histogram")
+    plt.xlabel(col)
+    plt.ylabel("Number of homes")
+    hist_path = os.path.join(output_folder, f"{name}_{col}_histogram.png")
+    plt.tight_layout()
+    plt.savefig(hist_path)
+    plt.close()
+
+    # --- Boxplot ---
+    plt.figure(figsize=(6, 5))
+    plt.boxplot(series, vert=True)
+    plt.title(f"{name}: {col} Boxplot")
+    plt.ylabel(col)
+    box_path = os.path.join(output_folder, f"{name}_{col}_boxplot.png")
+    plt.tight_layout()
+    plt.savefig(box_path)
+    plt.close()
+
+    print(f"Saved: {hist_path}")
+    print(f"Saved: {box_path}")
+
+
+# ---------------------------------------------------------------------------
+# STEP 4: Flag extreme outliers using the IQR method (flag only, no deleting)
+# ---------------------------------------------------------------------------
+
+def flag_outliers_iqr(df, col):
+    """
+    Returns a True/False Series marking which rows are extreme outliers
+    for this column, using the standard IQR rule:
+        anything below (Q1 - 1.5*IQR) or above (Q3 + 1.5*IQR) is flagged.
+    """
+    series = pd.to_numeric(df[col], errors="coerce")
+    q1 = series.quantile(0.25)
+    q3 = series.quantile(0.75)
+    iqr = q3 - q1
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    return (series < lower_bound) | (series > upper_bound)
+
+
+# ---------------------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    output_folder = "outputs"
+    charts_folder = os.path.join(output_folder, "charts")
+    os.makedirs(charts_folder, exist_ok=True)
+
+    sold = pd.read_csv(os.path.join(output_folder, "combined_sold_residential.csv"), low_memory=False)
+
+    # --- Percentile summary table for all 9 fields ---
+    summary = numeric_distribution_summary(sold, NUMERIC_FIELDS, "Sold")
+    summary.to_csv(os.path.join(output_folder, "sold_full_numeric_distribution_summary.csv"), index=False)
+
+    # --- Histograms + boxplots for all 9 fields ---
+    print("\n=== Generating histograms and boxplots ===")
+    for col in NUMERIC_FIELDS:
+        if col in sold.columns:
+            save_histogram_and_boxplot(sold, col, "Sold", charts_folder)
+
+    # --- Outlier flags for all 9 fields ---
+    print("\n=== Flagging extreme outliers (IQR method) ===")
+    outlier_counts = {}
+    for col in NUMERIC_FIELDS:
+        if col not in sold.columns:
+            continue
+        flag_col = f"{col}_outlier_flag"
+        sold[flag_col] = flag_outliers_iqr(sold, col)
+        outlier_counts[col] = sold[flag_col].sum()
+
+    for col, count in outlier_counts.items():
+        pct = round(count / len(sold) * 100, 2)
+        print(f"  {col}: {count} extreme outlier rows flagged ({pct}% of data)")
+
+    # --- Save the dataset with the new outlier flag columns added ---
+    flagged_out = os.path.join(output_folder, "sold_with_outlier_flags.csv")
+    sold.to_csv(flagged_out, index=False)
+    print(f"\nSaved dataset with outlier flag columns: {flagged_out}")
+
+
+#this code created boxplots and histograms for each ClosePrice, ListPrice, OriginalListPrice, LivingArea, LotSizeAcres, BedroomsTotal, BathroomsTotalInteger, DaysOnMarket, and YearBuilt
