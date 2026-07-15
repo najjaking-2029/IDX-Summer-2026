@@ -1,0 +1,95 @@
+WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+Home buyers pay attention to mortgage rates -- when rates are high, fewer
+people buy homes. This script grabs the real, national 30-year mortgage
+rate for every week, turns it into a monthly average, and then attaches
+("merges") that monthly rate onto our own Sold and Listing data. This lets
+us later ask questions like "did homes sell slower in months when rates
+were higher?"
+
+
+
+import pandas as pd
+import os
+
+# ---------------------------------------------------------------------------
+# STEP 1: Download the weekly mortgage rate data from FRED
+# ---------------------------------------------------------------------------
+# This is a public link -- no password or API key required.
+FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US"
+
+mortgage = pd.read_csv(FRED_URL, parse_dates=["observation_date"])
+mortgage.columns = ["date", "rate_30yr_fixed"]  # rename columns to be clear
+
+print(f"Downloaded {len(mortgage)} weekly mortgage rate records from FRED.")
+
+# ---------------------------------------------------------------------------
+# STEP 2: Turn the weekly numbers into one average number per month
+# ---------------------------------------------------------------------------
+# Example: if rates in March were 6.9%, 7.0%, 7.1%, 6.8% on four different
+# weeks, this turns that into one average number for "March 2024".
+
+mortgage["year_month"] = mortgage["date"].dt.to_period("M")
+
+mortgage_monthly = (
+    mortgage.groupby("year_month")["rate_30yr_fixed"]
+    .mean()
+    .reset_index()
+)
+
+print(f"Averaged down to {len(mortgage_monthly)} monthly mortgage rate records.")
+
+# ---------------------------------------------------------------------------
+# STEP 3 + 4: Load our own data, create a matching month label, and merge
+# ---------------------------------------------------------------------------
+
+output_folder = "outputs"
+
+sold = pd.read_csv(os.path.join(output_folder, "combined_sold_residential.csv"), low_memory=False)
+listings = pd.read_csv(os.path.join(output_folder, "combined_listings_residential.csv"), low_memory=False)
+
+# Sold homes are matched to the month they CLOSED in
+sold["year_month"] = pd.to_datetime(sold["CloseDate"], errors="coerce").dt.to_period("M")
+
+# Listings are matched to the month they were FIRST LISTED
+listings["year_month"] = pd.to_datetime(listings["ListingContractDate"], errors="coerce").dt.to_period("M")
+
+# "Left merge" means: keep every row of our data, and just tack the
+# matching mortgage rate onto it wherever the months line up.
+sold_with_rates = sold.merge(mortgage_monthly, on="year_month", how="left")
+listings_with_rates = listings.merge(mortgage_monthly, on="year_month", how="left")
+
+# ---------------------------------------------------------------------------
+# STEP 5: Validate - make sure nothing came back blank
+# ---------------------------------------------------------------------------
+
+sold_missing_rate = sold_with_rates["rate_30yr_fixed"].isnull().sum()
+listings_missing_rate = listings_with_rates["rate_30yr_fixed"].isnull().sum()
+
+print(f"\nSold rows with NO mortgage rate attached (should be 0): {sold_missing_rate}")
+print(f"Listing rows with NO mortgage rate attached (should be 0): {listings_missing_rate}")
+
+if sold_missing_rate > 0 or listings_missing_rate > 0:
+    print("[!] Some rows did not get a mortgage rate. This usually means "
+          "the FRED data doesn't cover that month yet (e.g. a future month), "
+          "or the date field had a bad/missing value.")
+
+# Quick look at a few rows to sanity-check the merge worked
+print("\nSample of merged Sold data:")
+print(sold_with_rates[["CloseDate", "year_month", "ClosePrice", "rate_30yr_fixed"]].head())
+
+# ---------------------------------------------------------------------------
+# STEP 6: Save the enriched files
+# ---------------------------------------------------------------------------
+
+sold_out = os.path.join(output_folder, "sold_with_mortgage_rates.csv")
+listings_out = os.path.join(output_folder, "listings_with_mortgage_rates.csv")
+
+sold_with_rates.to_csv(sold_out, index=False)
+listings_with_rates.to_csv(listings_out, index=False)
+
+print(f"\nSaved: {sold_out}")
+print(f"Saved: {listings_out}")
+
+
+# after the running code, I can confirm there are no sold rows with NO mortgage rate attached 
+# and I can confirm there are no listing rows with NO mortgage rate attached 
