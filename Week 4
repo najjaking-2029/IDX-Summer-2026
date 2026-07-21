@@ -1,0 +1,195 @@
+import . . . 
+
+# ---------------------------------------------------------------------------
+# STEP 0: Load the datasets from Week 3
+# ---------------------------------------------------------------------------
+
+output_folder = "outputs"
+
+sold = pd.read_csv(os.path.join(output_folder, "sold_with_mortgage_rates.csv"), low_memory=False)
+listings = pd.read_csv(os.path.join(output_folder, "listings_with_mortgage_rates.csv"), low_memory=False)
+
+sold_rows_start = len(sold)
+listings_rows_start = len(listings)
+print(f"Starting rows -- Sold: {sold_rows_start}, Listings: {listings_rows_start}")
+
+# ---------------------------------------------------------------------------
+# STEP 1: Convert date fields to real datetime values
+# ---------------------------------------------------------------------------
+# Right now, dates like "2024-03-15" are just text to Python. Converting them
+# to a real datetime lets us compare dates (e.g. "is this date before that
+# date?") which we need for the Week 5 date consistency checks.
+
+DATE_FIELDS = ["CloseDate", "PurchaseContractDate", "ListingContractDate", "ContractStatusChangeDate"]
+
+for col in DATE_FIELDS:
+    if col in sold.columns:
+        sold[col] = pd.to_datetime(sold[col], errors="coerce")
+    if col in listings.columns:
+        listings[col] = pd.to_datetime(listings[col], errors="coerce")
+
+print("\nConfirming date columns converted:")
+for col in DATE_FIELDS:
+    if col in sold.columns:
+        print(f"  Sold.{col}: {sold[col].dtype}")
+    if col in listings.columns:
+        print(f"  Listings.{col}: {listings[col].dtype}")
+
+# CONFIRMED: CloseDate, PurchaseContractDate, ListingContractDate, and
+# ContractStatusChangeDate all successfully converted to datetime64 in both datasets
+
+# ---------------------------------------------------------------------------
+# STEP 2: Remove unnecessary / redundant columns
+# ---------------------------------------------------------------------------
+# These are the columns flagged as >90% missing in the Week 2-3 missing
+# value report -- they don't have enough real data in them to be useful.
+# NOTE: the two lists are different because each dataset had slightly
+# different columns flagged as high-missing.
+
+LISTINGS_COLUMNS_TO_DROP = [
+    "MiddleOrJuniorSchoolDistrict", "CoveredSpaces", "TaxYear",
+    "ElementarySchoolDistrict", "TaxAnnualAmount", "BusinessType",
+    "AboveGradeFinishedArea", "FireplacesTotal", "BelowGradeFinishedArea",
+    "CoBuyerAgentFirstName", "BuilderName", "LotSizeDimensions",
+    "BuyerAgencyCompensation", "BuyerAgencyCompensationType", "BuildingAreaTotal",
+]
+
+SOLD_COLUMNS_TO_DROP = [
+    "FireplacesTotal", "MiddleOrJuniorSchoolDistrict", "CoveredSpaces",
+    "BusinessType", "ElementarySchoolDistrict", "TaxYear", "TaxAnnualAmount",
+    "AboveGradeFinishedArea", "WaterfrontYN", "BelowGradeFinishedArea",
+    "BasementYN", "LotSizeDimensions", "BuilderName", "BuildingAreaTotal",
+    "CoBuyerAgentFirstName",
+]
+
+listings_cols_before = listings.shape[1]
+sold_cols_before = sold.shape[1]
+
+# errors="ignore" means: if a column is already missing, don't crash, just skip it
+listings = listings.drop(columns=LISTINGS_COLUMNS_TO_DROP, errors="ignore")
+sold = sold.drop(columns=SOLD_COLUMNS_TO_DROP, errors="ignore")
+
+print(f"\nListings columns: {listings_cols_before} -> {listings.shape[1]} after dropping high-missing columns")
+print(f"Sold columns: {sold_cols_before} -> {sold.shape[1]} after dropping high-missing columns")
+
+# CONFIRMED: Listings columns reduced from 75 -> 60 after dropping 15 high-missing columns
+# CONFIRMED: Sold columns reduced from 84 -> 69 after dropping 15 high-missing columns
+
+# ---------------------------------------------------------------------------
+# STEP 3: Make sure numeric fields are properly typed
+# ---------------------------------------------------------------------------
+# pd.to_numeric forces a column to be a true number. Anything that can't be
+# turned into a number (like a stray text value) becomes NaN (blank)
+# instead of silently causing errors later.
+
+NUMERIC_FIELDS = [
+    "ClosePrice", "ListPrice", "OriginalListPrice", "LivingArea",
+    "LotSizeAcres", "BedroomsTotal", "BathroomsTotalInteger",
+    "DaysOnMarket", "YearBuilt",
+]
+
+for col in NUMERIC_FIELDS:
+    if col in sold.columns:
+        sold[col] = pd.to_numeric(sold[col], errors="coerce")
+    if col in listings.columns:
+        listings[col] = pd.to_numeric(listings[col], errors="coerce")
+
+print("\nConfirming numeric columns converted:")
+for col in NUMERIC_FIELDS:
+    if col in sold.columns:
+        print(f"  Sold.{col}: {sold[col].dtype}")
+
+# CONFIRMED: ClosePrice, ListPrice, OriginalListPrice, LivingArea, LotSizeAcres,
+# BedroomsTotal, BathroomsTotalInteger, and YearBuilt all confirmed as float64
+# CONFIRMED: DaysOnMarket confirmed as int64
+
+# ---------------------------------------------------------------------------
+# STEP 4: Flag (and then remove) invalid numeric values
+# ---------------------------------------------------------------------------
+# Per the handbook: ClosePrice <= 0, LivingArea <= 0, DaysOnMarket < 0,
+# and negative Bedrooms/Bathrooms are all impossible in real life.
+# We flag them first so there's a record of what got removed and why,
+# then build a "clean" version with those rows taken out.
+
+def flag_invalid_numeric(df):
+    df["invalid_price_flag"] = df["ClosePrice"] <= 0 if "ClosePrice" in df.columns else False
+    df["invalid_area_flag"] = df["LivingArea"] <= 0 if "LivingArea" in df.columns else False
+    df["invalid_dom_flag"] = df["DaysOnMarket"] < 0 if "DaysOnMarket" in df.columns else False
+    df["invalid_bedrooms_flag"] = df["BedroomsTotal"] < 0 if "BedroomsTotal" in df.columns else False
+    df["invalid_bathrooms_flag"] = df["BathroomsTotalInteger"] < 0 if "BathroomsTotalInteger" in df.columns else False
+    return df
+
+sold = flag_invalid_numeric(sold)
+listings = flag_invalid_numeric(listings)
+
+INVALID_FLAG_COLS = [
+    "invalid_price_flag", "invalid_area_flag", "invalid_dom_flag",
+    "invalid_bedrooms_flag", "invalid_bathrooms_flag",
+]
+
+print("\nInvalid numeric value counts (Sold):")
+for col in INVALID_FLAG_COLS:
+    print(f"  {col}: {sold[col].sum()}")
+
+print("\nInvalid numeric value counts (Listings):")
+for col in INVALID_FLAG_COLS:
+    print(f"  {col}: {listings[col].sum()}")
+
+# "any_invalid_numeric_flag" is True if a row tripped ANY of the 5 checks above
+sold["any_invalid_numeric_flag"] = sold[INVALID_FLAG_COLS].any(axis=1)
+listings["any_invalid_numeric_flag"] = listings[INVALID_FLAG_COLS].any(axis=1)
+
+# Build the clean versions with invalid rows removed
+sold_clean = sold[~sold["any_invalid_numeric_flag"]].copy()
+listings_clean = listings[~listings["any_invalid_numeric_flag"]].copy()
+
+print(f"\nSold: {len(sold)} rows before removing invalid numeric rows -> {len(sold_clean)} rows after")
+print(f"Listings: {len(listings)} rows before removing invalid numeric rows -> {len(listings_clean)} rows after")
+
+# CONFIRMED counts of invalid numeric values found --
+# Sold:     invalid_price_flag = 1, invalid_area_flag = 146, invalid_dom_flag = 45,
+#           invalid_bedrooms_flag = 0, invalid_bathrooms_flag = 0
+# Listings: invalid_price_flag = 0, invalid_area_flag = 359, invalid_dom_flag = 14,
+#           invalid_bedrooms_flag = 0, invalid_bathrooms_flag = 0
+
+
+# ---------------------------------------------------------------------------
+# STEP 5: Handle remaining missing values (report only -- no guessing/filling)
+# ---------------------------------------------------------------------------
+# We already removed the columns that were mostly empty in Step 2. For the
+# columns we KEPT, we don't want to invent fake data, so we just report how
+# much is still missing so it's documented.
+
+print("\nRemaining missing values in kept columns (Sold, top 10):")
+print(sold_clean.isnull().sum().sort_values(ascending=False).head(10))
+
+print("\nRemaining missing values in kept columns (Listings, top 10):")
+print(listings_clean.isnull().sum().sort_values(ascending=False).head(10))
+
+# CONFIRMED: Sold went from 384,161 rows -> 383,969 rows after removing invalid numeric rows (192 removed)
+# CONFIRMED: Listings went from 557,343 rows -> 556,970 rows after removing invalid numeric rows (373 removed)
+
+# ---------------------------------------------------------------------------
+# STEP 6: Save outputs
+# ---------------------------------------------------------------------------
+# We save BOTH the full flagged version (every row kept, with flag columns)
+# AND the clean filtered version (invalid rows removed), matching the
+# "flag first, don't just delete blindly" approach the handbook recommends.
+
+sold.to_csv(os.path.join(output_folder, "sold_flagged.csv"), index=False)
+listings.to_csv(os.path.join(output_folder, "listings_flagged.csv"), index=False)
+
+sold_clean.to_csv(os.path.join(output_folder, "sold_clean.csv"), index=False)
+listings_clean.to_csv(os.path.join(output_folder, "listings_clean.csv"), index=False)
+
+print("\nSaved: outputs/sold_flagged.csv (all rows + flag columns)")
+print("Saved: outputs/listings_flagged.csv (all rows + flag columns)")
+print("Saved: outputs/sold_clean.csv (invalid rows removed)")
+print("Saved: outputs/listings_clean.csv (invalid rows removed)")
+
+
+# CONFIRMED: after dropping the >90% missing columns, some kept columns still have
+# significant missingness (e.g. Sold.BuyerAgencyCompensation ~88% missing,
+# Listings.MiddleOrJuniorSchool ~88% missing) -- these were kept because they may
+# still be useful for specific analyses (e.g. school-based segmentation), per the
+# handbook's guidance to retain core fields even if partially missing
