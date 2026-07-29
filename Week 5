@@ -1,0 +1,153 @@
+WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+Now that dates are real datetime values (thanks to Week 4) and columns are
+cleaned up, this script checks two things that should logically make sense
+in real estate data, but sometimes don't because of data entry mistakes:
+
+1. DATE ORDER: A house should be LISTED first, then go under CONTRACT
+   (an offer gets accepted), then finally CLOSE (the sale finalizes).
+   If the dates are out of that order, something is wrong with the record.
+
+2. LOCATION: Every property should have a valid Latitude/Longitude that
+   actually falls somewhere in California. If it's missing, zero, or
+   outside California's borders, that's a location data problem.
+
+This script only FLAGS problem rows with True/False columns -- it does not
+delete anything. That keeps the door open to investigate flagged rows later
+instead of losing data by accident.
+
+INPUT: sold_flagged.csv / listings_flagged.csv (from week4_data_cleaning.py)
+"""
+
+import pandas as pd
+import os
+
+output_folder = "outputs"
+
+sold = pd.read_csv(os.path.join(output_folder, "sold_flagged.csv"), low_memory=False)
+listings = pd.read_csv(os.path.join(output_folder, "listings_flagged.csv"), low_memory=False)
+
+# The date columns were saved as datetime in Week 4, but reading a CSV back
+# in always turns dates into plain text again -- so we convert them once more.
+DATE_FIELDS = ["CloseDate", "PurchaseContractDate", "ListingContractDate", "ContractStatusChangeDate"]
+for col in DATE_FIELDS:
+    if col in sold.columns:
+        sold[col] = pd.to_datetime(sold[col], errors="coerce")
+    if col in listings.columns:
+        listings[col] = pd.to_datetime(listings[col], errors="coerce")
+
+
+# ---------------------------------------------------------------------------
+# PART 1: Date Consistency Checks
+# ---------------------------------------------------------------------------
+# The correct order should always be:
+#   ListingContractDate  ->  PurchaseContractDate  ->  CloseDate
+
+def add_date_consistency_flags(df, name):
+    # listing_after_close_flag: the home was "listed" AFTER it already closed
+    # -- impossible, means ListingContractDate or CloseDate was entered wrong
+    if "ListingContractDate" in df.columns and "CloseDate" in df.columns:
+        df["listing_after_close_flag"] = df["ListingContractDate"] > df["CloseDate"]
+    else:
+        df["listing_after_close_flag"] = False
+
+    # purchase_after_close_flag: the accepted offer date is AFTER the closing
+    # date -- also impossible, escrow can't close before an offer is accepted
+    if "PurchaseContractDate" in df.columns and "CloseDate" in df.columns:
+        df["purchase_after_close_flag"] = df["PurchaseContractDate"] > df["CloseDate"]
+    else:
+        df["purchase_after_close_flag"] = False
+
+    # negative_timeline_flag: a broader catch-all -- the listing date comes
+    # AFTER the purchase contract date (offer accepted before the home was
+    # even listed doesn't make sense)
+    if "ListingContractDate" in df.columns and "PurchaseContractDate" in df.columns:
+        df["negative_timeline_flag"] = df["ListingContractDate"] > df["PurchaseContractDate"]
+    else:
+        df["negative_timeline_flag"] = False
+
+    print(f"\n=== {name}: Date Consistency Flags ===")
+    print(f"  listing_after_close_flag: {df['listing_after_close_flag'].sum()} rows")
+    print(f"  purchase_after_close_flag: {df['purchase_after_close_flag'].sum()} rows")
+    print(f"  negative_timeline_flag: {df['negative_timeline_flag'].sum()} rows")
+
+    return df
+
+
+sold = add_date_consistency_flags(sold, "Sold")
+listings = add_date_consistency_flags(listings, "Listings")
+
+
+# CONFIRMED date consistency flag counts --
+# Sold:     listing_after_close_flag = 61, purchase_after_close_flag = 191,
+#           negative_timeline_flag = 256
+# Listings: listing_after_close_flag = 80, purchase_after_close_flag = 240,
+#           negative_timeline_flag = 281
+# These rows have dates out of logical order (e.g. closed before being listed)
+# and are flagged for review -- not removed, so the original records stay intact
+
+
+
+# ---------------------------------------------------------------------------
+# PART 2: Geographic Data Checks
+# ---------------------------------------------------------------------------
+# California's real coordinate range is roughly:
+#   Latitude:  32.5  to  42.0
+#   Longitude: -124.5 to -114.0   (longitude should always be NEGATIVE in CA)
+
+CA_LAT_MIN, CA_LAT_MAX = 32.5, 42.0
+CA_LON_MIN, CA_LON_MAX = -124.5, -114.0
+
+
+def add_geographic_flags(df, name):
+    # missing_coordinates_flag: no Latitude or no Longitude at all
+    df["missing_coordinates_flag"] = df["Latitude"].isnull() | df["Longitude"].isnull()
+
+    # zero_coordinates_flag: Latitude or Longitude is exactly 0
+    # (0, 0 is a common "placeholder" value systems use instead of truly blank)
+    df["zero_coordinates_flag"] = (df["Latitude"] == 0) | (df["Longitude"] == 0)
+
+    # longitude_positive_flag: Longitude is greater than 0
+    # (California longitudes should always be negative -- a positive value
+    # usually means the negative sign got dropped during data entry)
+    df["longitude_positive_flag"] = df["Longitude"] > 0
+
+    # implausible_coordinates_flag: coordinates that exist, aren't zero, but
+    # still fall outside California's real geographic borders
+    has_coords = df["Latitude"].notnull() & df["Longitude"].notnull()
+    within_ca = (
+        df["Latitude"].between(CA_LAT_MIN, CA_LAT_MAX)
+        & df["Longitude"].between(CA_LON_MIN, CA_LON_MAX)
+    )
+    df["implausible_coordinates_flag"] = has_coords & ~within_ca
+
+    print(f"\n=== {name}: Geographic Data Quality Summary ===")
+    print(f"  missing_coordinates_flag: {df['missing_coordinates_flag'].sum()} rows")
+    print(f"  zero_coordinates_flag: {df['zero_coordinates_flag'].sum()} rows")
+    print(f"  longitude_positive_flag: {df['longitude_positive_flag'].sum()} rows")
+    print(f"  implausible_coordinates_flag: {df['implausible_coordinates_flag'].sum()} rows")
+
+    return df
+
+
+sold = add_geographic_flags(sold, "Sold")
+listings = add_geographic_flags(listings, "Listings")
+
+# CONFIRMED geographic data quality flag counts --
+# Sold:     missing_coordinates_flag = 16,104 | zero_coordinates_flag = 34 |
+#           longitude_positive_flag = 25 | implausible_coordinates_flag = 86
+# Listings: missing_coordinates_flag = 71,862 | zero_coordinates_flag = 73 |
+#           longitude_positive_flag = 80 | implausible_coordinates_flag = 324
+# Missing coordinates is by far the largest issue in both datasets --
+# worth flagging to the director since it will limit any map-based dashboards
+# in Weeks 8-10 unless addressed
+
+
+sold.to_csv(os.path.join(output_folder, "sold_analysis_ready.csv"), index=False)
+listings.to_csv(os.path.join(output_folder, "listings_analysis_ready.csv"), index=False)
+
+print("\nSaved: outputs/sold_analysis_ready.csv")
+print("Saved: outputs/listings_analysis_ready.csv")
+
+# CONFIRMED: final analysis-ready files saved with all Week 4 (invalid numeric)
+# and Week 5 (date consistency + geographic) flag columns included, no rows deleted
+# in this script -- flagging only, per the handbook's tiered cleaning approach
