@@ -1,197 +1,172 @@
+WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+Now that the data is cleaned (Weeks 4-5), this script builds the actual
+"market metrics" that power the Tableau dashboards later. Think of this as
+turning raw facts (a price, a date) into useful INSIGHTS (a ratio, a trend).
+
+It creates 6 new columns:
+1. Price Ratio            -- ClosePrice / OriginalListPrice
+2. Price Per Sq Ft (PPSF)  -- ClosePrice / LivingArea
+3. Year / Month / YrMo     -- pulled out of CloseDate, for time-series charts
+4. Close-to-Original-List Ratio -- same formula as #1 (the handbook lists
+   this as its own metric, so we create it as its own clearly-named column)
+5. Listing-to-Contract Days -- how many days between listing and accepted offer
+6. Contract-to-Close Days   -- how many days between accepted offer and closing
+
+Then it groups the data by County and by Property Subtype to show summary
+statistics for each segment -- this is the "Segment Analysis" part of the
+handbook.
+
+INPUT: sold_analysis_ready.csv (from week5_validation_checks.py)
+"""
 
 import pandas as pd
 import os
 
-# ---------------------------------------------------------------------------
-# STEP 0: Load the datasets from Week 3
-# ---------------------------------------------------------------------------
-
 output_folder = "outputs"
 
-sold = pd.read_csv(os.path.join(output_folder, "sold_with_mortgage_rates.csv"), low_memory=False)
-listings = pd.read_csv(os.path.join(output_folder, "listings_with_mortgage_rates.csv"), low_memory=False)
+sold = pd.read_csv(os.path.join(output_folder, "sold_analysis_ready.csv"), low_memory=False)
 
-sold_rows_start = len(sold)
-listings_rows_start = len(listings)
-print(f"Starting rows -- Sold: {sold_rows_start}, Listings: {listings_rows_start}")
-
-# ---------------------------------------------------------------------------
-# STEP 1: Convert date fields to real datetime values
-# ---------------------------------------------------------------------------
-# Right now, dates like "2024-03-15" are just text to Python. Converting them
-# to a real datetime lets us compare dates (e.g. "is this date before that
-# date?") which we need for the Week 5 date consistency checks.
-
+# Dates get saved as plain text in a CSV, so convert them back to real dates
 DATE_FIELDS = ["CloseDate", "PurchaseContractDate", "ListingContractDate", "ContractStatusChangeDate"]
-
 for col in DATE_FIELDS:
     if col in sold.columns:
         sold[col] = pd.to_datetime(sold[col], errors="coerce")
-    if col in listings.columns:
-        listings[col] = pd.to_datetime(listings[col], errors="coerce")
 
-print("\nConfirming date columns converted:")
-for col in DATE_FIELDS:
-    if col in sold.columns:
-        print(f"  Sold.{col}: {sold[col].dtype}")
-    if col in listings.columns:
-        print(f"  Listings.{col}: {listings[col].dtype}")
-
-# CONFIRMED: CloseDate, PurchaseContractDate, ListingContractDate, and
-# ContractStatusChangeDate all successfully converted to datetime64 in both datasets
+rows_before = len(sold)
+print(f"Starting rows: {rows_before}")
 
 # ---------------------------------------------------------------------------
-# STEP 2: Remove unnecessary / redundant columns
+# METRIC 1: Price Ratio (ClosePrice / OriginalListPrice)
 # ---------------------------------------------------------------------------
-# These are the columns flagged as >90% missing in the Week 2-3 missing
-# value report -- they don't have enough real data in them to be useful.
-# NOTE: the two lists are different because each dataset had slightly
-# different columns flagged as high-missing.
+# This tells us how a home's final sale price compares to what it was
+# originally listed for. A ratio of 1.0 means it sold for exactly the
+# original asking price. Below 1.0 means it sold for less (buyer's market
+# leverage); above 1.0 means it sold for more (bidding war).
 
-LISTINGS_COLUMNS_TO_DROP = [
-    "MiddleOrJuniorSchoolDistrict", "CoveredSpaces", "TaxYear",
-    "ElementarySchoolDistrict", "TaxAnnualAmount", "BusinessType",
-    "AboveGradeFinishedArea", "FireplacesTotal", "BelowGradeFinishedArea",
-    "CoBuyerAgentFirstName", "BuilderName", "LotSizeDimensions",
-    "BuyerAgencyCompensation", "BuyerAgencyCompensationType", "BuildingAreaTotal",
+sold["price_ratio"] = sold["ClosePrice"] / sold["OriginalListPrice"]
+
+# SAFEGUARD: if OriginalListPrice is 0 or blank, dividing by it creates
+# "infinity" instead of a real number, which would silently wreck any
+# average calculated later (one infinite value makes the whole average
+# infinite). We turn those bad results back into a normal blank (NaN)
+# and print how many rows this affected, so it's documented rather than
+# hidden.
+bad_original_list_price = (sold["OriginalListPrice"] <= 0) | (sold["OriginalListPrice"].isnull())
+sold.loc[bad_original_list_price, "price_ratio"] = pd.NA
+print(f"\n[!] {bad_original_list_price.sum()} rows had OriginalListPrice <= 0 or blank "
+      f"-- price_ratio set to blank (NaN) for these instead of an infinite value")
+
+# ---------------------------------------------------------------------------
+# METRIC 2: Price Per Square Foot (PPSF)
+# ---------------------------------------------------------------------------
+# Two homes can have very different total prices just because one is bigger.
+# Dividing price by square footage lets us compare "value" on a level
+# playing field, regardless of home size.
+
+sold["price_per_sqft"] = sold["ClosePrice"] / sold["LivingArea"]
+
+# SAFEGUARD: same idea -- LivingArea of 0 or blank would create an infinite
+# price-per-sqft value and wreck any average built from this column.
+bad_living_area = (sold["LivingArea"] <= 0) | (sold["LivingArea"].isnull())
+sold.loc[bad_living_area, "price_per_sqft"] = pd.NA
+print(f"[!] {bad_living_area.sum()} rows had LivingArea <= 0 or blank "
+      f"-- price_per_sqft set to blank (NaN) for these instead of an infinite value")
+
+# ---------------------------------------------------------------------------
+# METRIC 3: Year / Month / YrMo (derived from CloseDate)
+# ---------------------------------------------------------------------------
+# Breaking the closing date into separate Year, Month, and a combined
+# "YrMo" label (like "2024-03") makes it easy to build monthly trend charts
+# in Tableau later.
+
+sold["close_year"] = sold["CloseDate"].dt.year
+sold["close_month"] = sold["CloseDate"].dt.month
+sold["close_yrmo"] = sold["CloseDate"].dt.to_period("M").astype(str)
+
+# ---------------------------------------------------------------------------
+# METRIC 4: Close-to-Original-List Ratio
+# ---------------------------------------------------------------------------
+# The handbook lists this as its own named metric, using the same formula
+# as Price Ratio above. We create it as its own column so the dashboard
+# field name matches exactly what's expected.
+
+sold["close_to_original_list_ratio"] = sold["ClosePrice"] / sold["OriginalListPrice"]
+sold.loc[bad_original_list_price, "close_to_original_list_ratio"] = pd.NA
+
+# ---------------------------------------------------------------------------
+# METRIC 5: Listing-to-Contract Days
+# ---------------------------------------------------------------------------
+# How many days passed between the home being LISTED and an offer being
+# ACCEPTED. A smaller number means the home attracted an offer quickly.
+# .dt.days turns the date difference into a plain number of days.
+
+sold["listing_to_contract_days"] = (
+    sold["PurchaseContractDate"] - sold["ListingContractDate"]
+).dt.days
+
+# ---------------------------------------------------------------------------
+# METRIC 6: Contract-to-Close Days
+# ---------------------------------------------------------------------------
+# How many days passed between the offer being ACCEPTED and the sale
+# actually CLOSING (escrow period).
+
+sold["contract_to_close_days"] = (
+    sold["CloseDate"] - sold["PurchaseContractDate"]
+).dt.days
+
+print(f"\nRows after adding engineered metrics: {len(sold)} (should be unchanged: {rows_before})")
+
+# ---------------------------------------------------------------------------
+# Sample output table -- proves the new columns populated correctly
+# ---------------------------------------------------------------------------
+
+# This list matches exactly what the Week 6 deliverable asks to see:
+# price ratio, close-to-original-list ratio, PPSF, days on market, YrMo,
+# listing-to-contract days, and contract-to-close days.
+new_columns = [
+    "price_ratio",
+    "close_to_original_list_ratio",
+    "price_per_sqft",
+    "DaysOnMarket",
+    "close_yrmo",
+    "listing_to_contract_days",
+    "contract_to_close_days",
 ]
 
-SOLD_COLUMNS_TO_DROP = [
-    "FireplacesTotal", "MiddleOrJuniorSchoolDistrict", "CoveredSpaces",
-    "BusinessType", "ElementarySchoolDistrict", "TaxYear", "TaxAnnualAmount",
-    "AboveGradeFinishedArea", "WaterfrontYN", "BelowGradeFinishedArea",
-    "BasementYN", "LotSizeDimensions", "BuilderName", "BuildingAreaTotal",
-    "CoBuyerAgentFirstName",
-]
-
-listings_cols_before = listings.shape[1]
-sold_cols_before = sold.shape[1]
-
-# errors="ignore" means: if a column is already missing, don't crash, just skip it
-listings = listings.drop(columns=LISTINGS_COLUMNS_TO_DROP, errors="ignore")
-sold = sold.drop(columns=SOLD_COLUMNS_TO_DROP, errors="ignore")
-
-print(f"\nListings columns: {listings_cols_before} -> {listings.shape[1]} after dropping high-missing columns")
-print(f"Sold columns: {sold_cols_before} -> {sold.shape[1]} after dropping high-missing columns")
-
-# CONFIRMED: Listings columns reduced from 75 -> 60 after dropping 15 high-missing columns
-# CONFIRMED: Sold columns reduced from 84 -> 69 after dropping 15 high-missing columns
+print("\n=== Sample of engineered metrics (first 5 rows) ===")
+print(sold[new_columns].head().to_string(index=False))
 
 # ---------------------------------------------------------------------------
-# STEP 3: Make sure numeric fields are properly typed
+# Segment Analysis -- group by County and by Property Subtype
 # ---------------------------------------------------------------------------
-# pd.to_numeric forces a column to be a true number. Anything that can't be
-# turned into a number (like a stray text value) becomes NaN (blank)
-# instead of silently causing errors later.
+# This shows median/average metrics broken out by segment, which is exactly
+# what powers the "top counties" and "top property types" style dashboards.
 
-NUMERIC_FIELDS = [
-    "ClosePrice", "ListPrice", "OriginalListPrice", "LivingArea",
-    "LotSizeAcres", "BedroomsTotal", "BathroomsTotalInteger",
-    "DaysOnMarket", "YearBuilt",
-]
+def segment_summary(df, group_col, name):
+    summary = df.groupby(group_col).agg(
+        num_sales=("ClosePrice", "count"),
+        median_close_price=("ClosePrice", "median"),
+        avg_price_per_sqft=("price_per_sqft", "mean"),
+        avg_days_on_market=("DaysOnMarket", "mean"),
+        avg_price_ratio=("price_ratio", "mean"),
+    ).sort_values("num_sales", ascending=False)
 
-for col in NUMERIC_FIELDS:
-    if col in sold.columns:
-        sold[col] = pd.to_numeric(sold[col], errors="coerce")
-    if col in listings.columns:
-        listings[col] = pd.to_numeric(listings[col], errors="coerce")
+    print(f"\n=== Segment Summary by {group_col} ({name}, top 10) ===")
+    print(summary.head(10).to_string())
+    return summary
 
-print("\nConfirming numeric columns converted:")
-for col in NUMERIC_FIELDS:
-    if col in sold.columns:
-        print(f"  Sold.{col}: {sold[col].dtype}")
 
-# CONFIRMED: ClosePrice, ListPrice, OriginalListPrice, LivingArea, LotSizeAcres,
-# BedroomsTotal, BathroomsTotalInteger, and YearBuilt all confirmed as float64
-# CONFIRMED: DaysOnMarket confirmed as int64
+county_summary = segment_summary(sold, "CountyOrParish", "Sold")
+subtype_summary = segment_summary(sold, "PropertySubType", "Sold")
 
 # ---------------------------------------------------------------------------
-# STEP 4: Flag (and then remove) invalid numeric values
+# Save outputs
 # ---------------------------------------------------------------------------
-# Per the handbook: ClosePrice <= 0, LivingArea <= 0, DaysOnMarket < 0,
-# and negative Bedrooms/Bathrooms are all impossible in real life.
-# We flag them first so there's a record of what got removed and why,
-# then build a "clean" version with those rows taken out.
 
-def flag_invalid_numeric(df):
-    df["invalid_price_flag"] = df["ClosePrice"] <= 0 if "ClosePrice" in df.columns else False
-    df["invalid_area_flag"] = df["LivingArea"] <= 0 if "LivingArea" in df.columns else False
-    df["invalid_dom_flag"] = df["DaysOnMarket"] < 0 if "DaysOnMarket" in df.columns else False
-    df["invalid_bedrooms_flag"] = df["BedroomsTotal"] < 0 if "BedroomsTotal" in df.columns else False
-    df["invalid_bathrooms_flag"] = df["BathroomsTotalInteger"] < 0 if "BathroomsTotalInteger" in df.columns else False
-    return df
+sold.to_csv(os.path.join(output_folder, "sold_with_engineered_metrics.csv"), index=False)
+county_summary.to_csv(os.path.join(output_folder, "segment_summary_by_county.csv"))
+subtype_summary.to_csv(os.path.join(output_folder, "segment_summary_by_subtype.csv"))
 
-sold = flag_invalid_numeric(sold)
-listings = flag_invalid_numeric(listings)
-
-INVALID_FLAG_COLS = [
-    "invalid_price_flag", "invalid_area_flag", "invalid_dom_flag",
-    "invalid_bedrooms_flag", "invalid_bathrooms_flag",
-]
-
-print("\nInvalid numeric value counts (Sold):")
-for col in INVALID_FLAG_COLS:
-    print(f"  {col}: {sold[col].sum()}")
-
-print("\nInvalid numeric value counts (Listings):")
-for col in INVALID_FLAG_COLS:
-    print(f"  {col}: {listings[col].sum()}")
-
-# "any_invalid_numeric_flag" is True if a row tripped ANY of the 5 checks above
-sold["any_invalid_numeric_flag"] = sold[INVALID_FLAG_COLS].any(axis=1)
-listings["any_invalid_numeric_flag"] = listings[INVALID_FLAG_COLS].any(axis=1)
-
-# Build the clean versions with invalid rows removed
-sold_clean = sold[~sold["any_invalid_numeric_flag"]].copy()
-listings_clean = listings[~listings["any_invalid_numeric_flag"]].copy()
-
-print(f"\nSold: {len(sold)} rows before removing invalid numeric rows -> {len(sold_clean)} rows after")
-print(f"Listings: {len(listings)} rows before removing invalid numeric rows -> {len(listings_clean)} rows after")
-
-# CONFIRMED counts of invalid numeric values found --
-# Sold:     invalid_price_flag = 1, invalid_area_flag = 146, invalid_dom_flag = 45,
-#           invalid_bedrooms_flag = 0, invalid_bathrooms_flag = 0
-# Listings: invalid_price_flag = 0, invalid_area_flag = 359, invalid_dom_flag = 14,
-#           invalid_bedrooms_flag = 0, invalid_bathrooms_flag = 0
-
-
-# ---------------------------------------------------------------------------
-# STEP 5: Handle remaining missing values (report only -- no guessing/filling)
-# ---------------------------------------------------------------------------
-# We already removed the columns that were mostly empty in Step 2. For the
-# columns we KEPT, we don't want to invent fake data, so we just report how
-# much is still missing so it's documented.
-
-print("\nRemaining missing values in kept columns (Sold, top 10):")
-print(sold_clean.isnull().sum().sort_values(ascending=False).head(10))
-
-print("\nRemaining missing values in kept columns (Listings, top 10):")
-print(listings_clean.isnull().sum().sort_values(ascending=False).head(10))
-
-# CONFIRMED: Sold went from 384,161 rows -> 383,969 rows after removing invalid numeric rows (192 removed)
-# CONFIRMED: Listings went from 557,343 rows -> 556,970 rows after removing invalid numeric rows (373 removed)
-
-# ---------------------------------------------------------------------------
-# STEP 6: Save outputs
-# ---------------------------------------------------------------------------
-# We save BOTH the full flagged version (every row kept, with flag columns)
-# AND the clean filtered version (invalid rows removed), matching the
-# "flag first, don't just delete blindly" approach the handbook recommends.
-
-sold.to_csv(os.path.join(output_folder, "sold_flagged.csv"), index=False)
-listings.to_csv(os.path.join(output_folder, "listings_flagged.csv"), index=False)
-
-sold_clean.to_csv(os.path.join(output_folder, "sold_clean.csv"), index=False)
-listings_clean.to_csv(os.path.join(output_folder, "listings_clean.csv"), index=False)
-
-print("\nSaved: outputs/sold_flagged.csv (all rows + flag columns)")
-print("Saved: outputs/listings_flagged.csv (all rows + flag columns)")
-print("Saved: outputs/sold_clean.csv (invalid rows removed)")
-print("Saved: outputs/listings_clean.csv (invalid rows removed)")
-
-
-# CONFIRMED: after dropping the >90% missing columns, some kept columns still have
-# significant missingness (e.g. Sold.BuyerAgencyCompensation ~88% missing,
-# Listings.MiddleOrJuniorSchool ~88% missing) -- these were kept because they may
-# still be useful for specific analyses (e.g. school-based segmentation), per the
-# handbook's guidance to retain core fields even if partially missing
+print("\nSaved: outputs/sold_with_engineered_metrics.csv")
+print("Saved: outputs/segment_summary_by_county.csv")
+print("Saved: outputs/segment_summary_by_subtype.csv")
