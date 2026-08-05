@@ -1,0 +1,7 @@
+=== Sample of engineered metrics (first 5 rows) ===
+ price_ratio  close_to_original_list_ratio  price_per_sqft  DaysOnMarket close_yrmo  listing_to_contract_days  contract_to_close_days
+    0.480962                      0.480962      210.526316           777    2024-01                     777.0                    65.0
+    1.072510                      1.072510      412.867275            33    2024-01                     114.0                   919.0
+    1.094743                      1.094743      410.334347           228    2024-01                     255.0                   778.0
+         NaN                           NaN      430.075188             0    2024-01                     188.0                  -188.0
+    1.000000                      1.000000      591.891046             0    2024-01                       0.0                     0.0
