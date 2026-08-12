@@ -1,0 +1,76 @@
+import pandas as pd
+import os
+
+output_folder = "outputs"
+
+# using the file from week 6 since it already has ClosePrice, LivingArea,
+# DaysOnMarket cleaned up from weeks 4-5
+sold = pd.read_csv(os.path.join(output_folder, "sold_with_engineered_metrics.csv"), low_memory=False)
+
+rows_before = len(sold)
+print(f"Starting with {rows_before} rows")
+
+# these are the 3 fields the handbook wants us to check for outliers
+fields_to_check = ["ClosePrice", "LivingArea", "DaysOnMarket"]
+
+# grabbing medians before we do anything, so we can compare before/after later
+medians_before = {}
+for col in fields_to_check:
+    medians_before[col] = sold[col].median()
+    print(f"Median {col} BEFORE filtering: {medians_before[col]}")
+
+
+def get_iqr_bounds(series):
+    # standard IQR outlier math from the handbook
+    # anything below Q1-1.5xIQR or above Q3+1.5xIQR counts as an outlier
+    q1 = series.quantile(0.25)
+    q3 = series.quantile(0.75)
+    iqr = q3 - q1
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+    return lower, upper
+
+
+# flag each field separately instead of deleting anything yet
+for col in fields_to_check:
+    lower, upper = get_iqr_bounds(sold[col])
+    flag_col = f"{col}_outlier_flag"
+    sold[flag_col] = (sold[col] < lower) | (sold[col] > upper)
+    print(f"{col}: bounds are [{round(lower, 2)}, {round(upper, 2)}] -> "
+          f"{sold[flag_col].sum()} rows flagged as outliers")
+
+# making one combined flag too just in case that's useful for anything later,
+# true if ANY of the 3 fields flagged that row
+outlier_flag_cols = [f"{c}_outlier_flag" for c in fields_to_check]
+sold["any_outlier_flag"] = sold[outlier_flag_cols].any(axis=1)
+
+print(f"\nTotal rows flagged as an outlier in at least one field: {sold['any_outlier_flag'].sum()}")
+
+# now build the "clean" version - same as weeks 4/5, keep the full flagged
+# version AND make a separate filtered one
+sold_clean = sold[~sold["any_outlier_flag"]].copy()
+
+print(f"\nRows before removing outliers: {len(sold)}")
+print(f"Rows after removing outliers: {len(sold_clean)}")
+print(f"Rows removed: {len(sold) - len(sold_clean)}")
+
+# comparing medians before vs after so we can see how much the outliers
+# were actually distorting things
+print("\n--- Median comparison (before filtering vs after filtering) ---")
+for col in fields_to_check:
+    median_after = sold_clean[col].median()
+    print(f"{col}: before = {medians_before[col]}, after = {median_after}")
+
+# save both versions, not overwriting the raw one
+sold.to_csv(os.path.join(output_folder, "sold_outliers_flagged.csv"), index=False)
+sold_clean.to_csv(os.path.join(output_folder, "sold_outliers_removed_clean.csv"), index=False)
+
+print("\nSaved outputs/sold_outliers_flagged.csv (everything, with flags)")
+print("Saved outputs/sold_outliers_removed_clean.csv (outlier rows taken out)")
+
+# --------------------------------------------------------------------
+# Applying IQR filtering flagged 58,933 rows (about 15% of the dataset) as outliers across ClosePrice,
+# LivingArea, and DaysOnMarket. After removing them, the dataset went from 384,161 to 325,228 rows.
+# Medians shifted only slightly — ClosePrice $820K → $785K, LivingArea 1,647 → 1,574 sqft,
+# DaysOnMarket 19 → 17 days — showing the outliers weren't distorting the typical home much,
+# but they would have skewed averages and extreme values if left in
