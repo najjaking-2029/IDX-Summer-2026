@@ -1,4 +1,5 @@
-import . . . 
+import pandas as pd
+import os
 
 # ---------------------------------------------------------------------------
 # STEP 0: Load the datasets from Week 3
@@ -57,8 +58,7 @@ LISTINGS_COLUMNS_TO_DROP = [
 SOLD_COLUMNS_TO_DROP = [
     "FireplacesTotal", "MiddleOrJuniorSchoolDistrict", "CoveredSpaces",
     "BusinessType", "ElementarySchoolDistrict", "TaxYear", "TaxAnnualAmount",
-    "AboveGradeFinishedArea", "WaterfrontYN", "BelowGradeFinishedArea",
-    "BasementYN", "LotSizeDimensions", "BuilderName", "BuildingAreaTotal",
+    "AboveGradeFinishedArea", "BelowGradeFinishedArea", "LotSizeDimensions", "BuilderName", "BuildingAreaTotal",
     "CoBuyerAgentFirstName",
 ]
 
@@ -72,8 +72,6 @@ sold = sold.drop(columns=SOLD_COLUMNS_TO_DROP, errors="ignore")
 print(f"\nListings columns: {listings_cols_before} -> {listings.shape[1]} after dropping high-missing columns")
 print(f"Sold columns: {sold_cols_before} -> {sold.shape[1]} after dropping high-missing columns")
 
-# CONFIRMED: Listings columns reduced from 75 -> 60 after dropping 15 high-missing columns
-# CONFIRMED: Sold columns reduced from 84 -> 69 after dropping 15 high-missing columns
 
 # ---------------------------------------------------------------------------
 # STEP 3: Make sure numeric fields are properly typed
@@ -146,11 +144,6 @@ listings_clean = listings[~listings["any_invalid_numeric_flag"]].copy()
 print(f"\nSold: {len(sold)} rows before removing invalid numeric rows -> {len(sold_clean)} rows after")
 print(f"Listings: {len(listings)} rows before removing invalid numeric rows -> {len(listings_clean)} rows after")
 
-# CONFIRMED counts of invalid numeric values found --
-# Sold:     invalid_price_flag = 1, invalid_area_flag = 146, invalid_dom_flag = 45,
-#           invalid_bedrooms_flag = 0, invalid_bathrooms_flag = 0
-# Listings: invalid_price_flag = 0, invalid_area_flag = 359, invalid_dom_flag = 14,
-#           invalid_bedrooms_flag = 0, invalid_bathrooms_flag = 0
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +159,6 @@ print(sold_clean.isnull().sum().sort_values(ascending=False).head(10))
 print("\nRemaining missing values in kept columns (Listings, top 10):")
 print(listings_clean.isnull().sum().sort_values(ascending=False).head(10))
 
-# CONFIRMED: Sold went from 384,161 rows -> 383,969 rows after removing invalid numeric rows (192 removed)
-# CONFIRMED: Listings went from 557,343 rows -> 556,970 rows after removing invalid numeric rows (373 removed)
 
 # ---------------------------------------------------------------------------
 # STEP 6: Save outputs
@@ -193,3 +184,9 @@ print("Saved: outputs/listings_clean.csv (invalid rows removed)")
 # Listings.MiddleOrJuniorSchool ~88% missing) -- these were kept because they may
 # still be useful for specific analyses (e.g. school-based segmentation), per the
 # handbook's guidance to retain core fields even if partially missing
+
+#CONFIRMWED: Listings columns: 75 -> 60 after dropping high-missing columns
+#Sold columns: 84 -> 71 after dropping high-missing columns
+
+#CONFIRMED: Sold rows: 384161 rows before removing invalid numeric rows -> 383969 rows after
+#Listings rows: 557343 rows before removing invalid numeric rows -> 556970 rows after
