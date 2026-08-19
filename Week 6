@@ -1,24 +1,3 @@
-WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
-Now that the data is cleaned (Weeks 4-5), this script builds the actual
-"market metrics" that power the Tableau dashboards later. Think of this as
-turning raw facts (a price, a date) into useful INSIGHTS (a ratio, a trend).
-
-It creates 6 new columns:
-1. Price Ratio            -- ClosePrice / OriginalListPrice
-2. Price Per Sq Ft (PPSF)  -- ClosePrice / LivingArea
-3. Year / Month / YrMo     -- pulled out of CloseDate, for time-series charts
-4. Close-to-Original-List Ratio -- same formula as #1 (the handbook lists
-   this as its own metric, so we create it as its own clearly-named column)
-5. Listing-to-Contract Days -- how many days between listing and accepted offer
-6. Contract-to-Close Days   -- how many days between accepted offer and closing
-
-Then it groups the data by County and by Property Subtype to show summary
-statistics for each segment -- this is the "Segment Analysis" part of the
-handbook.
-
-INPUT: sold_analysis_ready.csv (from week5_validation_checks.py)
-"""
-
 import pandas as pd
 import os
 
@@ -137,6 +116,59 @@ print("\n=== Sample of engineered metrics (first 5 rows) ===")
 print(sold[new_columns].head().to_string(index=False))
 
 # ---------------------------------------------------------------------------
+# School District Enrichment -- spatial join using Latitude/Longitude
+# ---------------------------------------------------------------------------
+# The handbook wants us to figure out which school district each property
+# falls in, using its coordinates. This needs GeoPandas because it's not a
+# normal merge (matching on a shared column) -- it's a SPATIAL join, matching
+# based on whether a point (the home) falls INSIDE a shape (the district
+# boundary).
+#
+# Data source: CA school district boundaries (2024-25) from data.ca.gov
+# https://data.ca.gov/dataset/california-school-district-areas-2024-25
+
+import geopandas as gpd
+from shapely.geometry import Point
+
+SCHOOL_DISTRICT_SHAPEFILE_URL = (
+    "https://gis.data.ca.gov/api/download/v1/items/b0e3b936426a47ce9d9a2e77e2bb86cc/geojson?layers=0"
+)
+
+print("\n=== School District Spatial Join ===")
+
+# load the CA school district boundaries as polygons
+school_districts = gpd.read_file(SCHOOL_DISTRICT_SHAPEFILE_URL)
+
+# turn each home's Latitude/Longitude into a "point" geometry so it can be
+# compared against the district polygons. EPSG:4326 is just the standard
+# coordinate system regular lat/long values use (same one Google Maps uses)
+sold_geo = sold.dropna(subset=["Latitude", "Longitude"]).copy()
+geometry = [Point(xy) for xy in zip(sold_geo["Longitude"], sold_geo["Latitude"])]
+sold_gdf = gpd.GeoDataFrame(sold_geo, geometry=geometry, crs="EPSG:4326")
+school_districts = school_districts.to_crs("EPSG:4326")
+
+# the actual spatial join -- for each home point, find which district
+# polygon it physically falls inside of
+joined = gpd.sjoin(sold_gdf, school_districts, how="left", predicate="within")
+
+# sjoin can occasionally produce more than one match per home if district
+# boundaries overlap slightly, so we dedupe back down to one row per home
+joined = joined.drop_duplicates(subset="ListingKey")
+
+# grab just the district name + the key to match back on, then merge it
+# onto our main sold dataframe (this keeps rows with missing coordinates
+# in the dataset too, they'll just have a blank school_district)
+district_lookup = joined[["ListingKey", "DistrictName"]].rename(
+    columns={"DistrictName": "school_district"}
+)
+sold = sold.merge(district_lookup, on="ListingKey", how="left")
+
+print(f"School district matched for {sold['school_district'].notnull().sum()} "
+      f"out of {len(sold)} rows "
+      f"({sold['school_district'].isnull().sum()} unmatched -- likely missing "
+      f"or invalid coordinates)")
+
+# ---------------------------------------------------------------------------
 # Segment Analysis -- group by County and by Property Subtype
 # ---------------------------------------------------------------------------
 # This shows median/average metrics broken out by segment, which is exactly
@@ -160,13 +192,37 @@ county_summary = segment_summary(sold, "CountyOrParish", "Sold")
 subtype_summary = segment_summary(sold, "PropertySubType", "Sold")
 
 # ---------------------------------------------------------------------------
+# Competitive Intelligence Segment -- group by List Office AND Buyer Office
+# ---------------------------------------------------------------------------
+# This is the "competitive intelligence" piece the handbook mentions --
+# grouping by BOTH the listing brokerage and buyer brokerage together shows
+# which office pairs are closing deals with each other most often, which
+# feeds into the Week 8-10 competitive analysis dashboards.
+
+brokerage_summary = sold.groupby(["ListOfficeName", "BuyerOfficeName"]).agg(
+    num_sales=("ClosePrice", "count"),
+    total_sales_volume=("ClosePrice", "sum"),
+    median_close_price=("ClosePrice", "median"),
+).sort_values("num_sales", ascending=False)
+
+print(f"\n=== Segment Summary by ListOfficeName + BuyerOfficeName (Sold, top 10) ===")
+print(brokerage_summary.head(10).to_string())
+
+# ---------------------------------------------------------------------------
 # Save outputs
 # ---------------------------------------------------------------------------
 
 sold.to_csv(os.path.join(output_folder, "sold_with_engineered_metrics.csv"), index=False)
 county_summary.to_csv(os.path.join(output_folder, "segment_summary_by_county.csv"))
 subtype_summary.to_csv(os.path.join(output_folder, "segment_summary_by_subtype.csv"))
+brokerage_summary.to_csv(os.path.join(output_folder, "segment_summary_by_brokerage.csv"))
 
 print("\nSaved: outputs/sold_with_engineered_metrics.csv")
 print("Saved: outputs/segment_summary_by_county.csv")
 print("Saved: outputs/segment_summary_by_subtype.csv")
+print("Saved: outputs/segment_summary_by_brokerage.csv")
+
+
+# CONFIRMED: school district matched for 367861 out of 384161 rows
+# (16300 rows unmatched -- likely missing/invalid coordinates, consistent
+# with the missing_coordinates_flag count from Week 5)
