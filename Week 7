@@ -10,8 +10,12 @@ sold = pd.read_csv(os.path.join(output_folder, "sold_with_engineered_metrics.csv
 rows_before = len(sold)
 print(f"Starting with {rows_before} rows")
 
-# these are the 3 fields the handbook wants us to check for outliers
-fields_to_check = ["ClosePrice", "LivingArea", "DaysOnMarket"]
+# these are the fields the handbook wants us to check for outliers -
+# started with just the 3 basic ones but adding price_per_sqft and
+# price_ratio too since those are engineered metrics that can have their
+# own weird extreme values (like the crazy high price_ratio outliers we
+# saw pop up in some counties back in week 6)
+fields_to_check = ["ClosePrice", "LivingArea", "DaysOnMarket", "price_per_sqft", "price_ratio"]
 
 # grabbing medians before we do anything, so we can compare before/after later
 medians_before = {}
@@ -69,8 +73,24 @@ print("\nSaved outputs/sold_outliers_flagged.csv (everything, with flags)")
 print("Saved outputs/sold_outliers_removed_clean.csv (outlier rows taken out)")
 
 # --------------------------------------------------------------------
-# Applying IQR filtering flagged 58,933 rows (about 15% of the dataset) as outliers across ClosePrice,
-# LivingArea, and DaysOnMarket. After removing them, the dataset went from 384,161 to 325,228 rows.
-# Medians shifted only slightly — ClosePrice $820K → $785K, LivingArea 1,647 → 1,574 sqft,
-# DaysOnMarket 19 → 17 days — showing the outliers weren't distorting the typical home much,
-# but they would have skewed averages and extreme values if left in
+# CONFIRMED: expanded outlier checks from 3 fields to 5 by adding
+# price_per_sqft and price_ratio, since these engineered metrics can
+#have their own extreme values separate from the raw fields
+
+# outlier counts per field --
+# ClosePrice: 28,429 | LivingArea: 16,695 | DaysOnMarket: 28,092 |
+# price_per_sqft: 16,250 | price_ratio: 36,467
+
+# total rows flagged as an outlier in at least one field: 87,306
+# rows before removing outliers: 384,161 -> rows after: 296,855 (87,306 removed)
+
+# median comparison (before -> after) --
+# ClosePrice: 820,000 -> 767,000 | LivingArea: 1,647 -> 1,584 |
+#DaysOnMarket: 19 -> 17 | price_per_sqft: 534.85 -> 514.17 |
+# price_ratio: 0.993 -> 1.0
+
+# medians stayed close across the board, meaning the outliers were mostly
+# distorting averages/extremes rather than shifting what a "typical" home
+# looks like -- price_ratio landing almost exactly at 1.0 after filtering
+# makes sense too, since removing the extreme deals should leave mostly
+# homes that sold near their original list price
