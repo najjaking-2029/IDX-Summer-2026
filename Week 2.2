@@ -1,3 +1,27 @@
+"""
+Weeks 2-3 Deliverable (Part 3) - Numeric Distribution Review
+----------------------------------------------------------------
+Author: Najja A. King
+Program: IDX Exchange Data Analyst Internship (Summer 2026, Group DA 39)
+
+WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+For each important number column (price, size, bedrooms, etc.), this script
+makes three things:
+1. A HISTOGRAM -- a bar chart showing how many homes fall into each price/
+   size "bucket". This shows you the overall SHAPE of the data (is it mostly
+   clustered in one spot, or spread out?).
+2. A BOXPLOT -- a chart that shows the middle chunk of the data as a box,
+   with a line down the middle for the median, and dots for extreme values
+   sticking out past the "whiskers". This is the fastest way to SEE outliers.
+3. A PERCENTILE SUMMARY TABLE -- the same min/25%/median/75%/95%/max numbers
+   we already calculated, just for more columns this time.
+
+It also flags which rows are "extreme outliers" using the IQR (Interquartile
+Range) method. IMPORTANT: this script only FLAGS outliers with a True/False
+column -- it does NOT delete any rows. Actually removing outliers happens
+later, in Week 7.
+"""
+
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # lets this run without needing a pop-up window
@@ -54,30 +78,97 @@ def numeric_distribution_summary(df, columns, name):
 # ---------------------------------------------------------------------------
 
 def save_histogram_and_boxplot(df, col, name, output_folder):
+    """
+    Create a clearer histogram and horizontal boxplot.
+
+    Price columns are automatically displayed in thousands ($K) or millions
+    ($M), depending on the size of the data. LivingArea is displayed in
+    square feet. The output filenames stay exactly the same so the new charts
+    overwrite the existing charts.
+    """
     series = pd.to_numeric(df[col], errors="coerce").dropna()
     if series.empty:
         print(f"[!] '{col}' has no usable numeric data in {name}, skipping charts.")
         return
 
-    # --- Histogram ---
-    plt.figure(figsize=(8, 5))
-    plt.hist(series, bins=50)
+    # -----------------------------------------------------------------------
+    # Choose readable units/labels
+    # -----------------------------------------------------------------------
+    is_price = col in ["OriginalListPrice", "ListPrice", "ClosePrice"]
+    is_living_area = col == "LivingArea"
+
+    plot_series = series.copy()
+
+    if is_price:
+        # Use one consistent unit for the entire chart.
+        max_value = series.max()
+
+        if max_value >= 1_000_000:
+            divisor = 1_000_000
+            unit = "millions ($M)"
+            value_format = lambda x: f"${x:.1f}M"
+        else:
+            divisor = 1_000
+            unit = "thousands ($K)"
+            value_format = lambda x: f"${x:.0f}K"
+
+        plot_series = series / divisor
+        x_label = f"{col} ({unit})"
+        box_label = f"{col} ({unit})"
+
+    elif is_living_area:
+        x_label = "Living Area (square feet)"
+        box_label = "Living Area (square feet)"
+
+    else:
+        x_label = col
+        box_label = col
+
+    # -----------------------------------------------------------------------
+    # Histogram
+    # -----------------------------------------------------------------------
+    plt.figure(figsize=(9, 5.5))
+    plt.hist(plot_series, bins=50, edgecolor="black", linewidth=0.5)
+
     plt.title(f"{name}: {col} Histogram")
-    plt.xlabel(col)
+    plt.xlabel(x_label)
     plt.ylabel("Number of homes")
+    plt.grid(axis="y", alpha=0.25)
+
+    if is_price:
+        ax = plt.gca()
+        ticks = ax.get_xticks()
+        ax.set_xticklabels([value_format(x) for x in ticks])
+
     hist_path = os.path.join(output_folder, f"{name}_{col}_histogram.png")
     plt.tight_layout()
-    plt.savefig(hist_path)
+    plt.savefig(hist_path, dpi=150)
     plt.close()
 
-    # --- Boxplot ---
-    plt.figure(figsize=(6, 5))
-    plt.boxplot(series, vert=True)
+    # -----------------------------------------------------------------------
+    # Horizontal boxplot
+    # -----------------------------------------------------------------------
+    plt.figure(figsize=(9, 2.8))
+    plt.boxplot(
+        plot_series,
+        vert=False,
+        patch_artist=False,
+        flierprops=dict(marker="o", markersize=3, alpha=0.5)
+    )
+
     plt.title(f"{name}: {col} Boxplot")
-    plt.ylabel(col)
+    plt.xlabel(box_label)
+    plt.yticks([1], [col])
+    plt.grid(axis="x", alpha=0.25)
+
+    if is_price:
+        ax = plt.gca()
+        ticks = ax.get_xticks()
+        ax.set_xticklabels([value_format(x) for x in ticks])
+
     box_path = os.path.join(output_folder, f"{name}_{col}_boxplot.png")
     plt.tight_layout()
-    plt.savefig(box_path)
+    plt.savefig(box_path, dpi=150)
     plt.close()
 
     print(f"Saved: {hist_path}")
@@ -119,6 +210,8 @@ if __name__ == "__main__":
     summary.to_csv(os.path.join(output_folder, "sold_full_numeric_distribution_summary.csv"), index=False)
 
     # --- Histograms + boxplots for all 9 fields ---
+    # Price charts use readable $K/$M units, LivingArea uses square feet,
+    # and every boxplot is horizontal.
     print("\n=== Generating histograms and boxplots ===")
     for col in NUMERIC_FIELDS:
         if col in sold.columns:
@@ -142,6 +235,3 @@ if __name__ == "__main__":
     flagged_out = os.path.join(output_folder, "sold_with_outlier_flags.csv")
     sold.to_csv(flagged_out, index=False)
     print(f"\nSaved dataset with outlier flag columns: {flagged_out}")
-
-
-#this code created boxplots and histograms for each ClosePrice, ListPrice, OriginalListPrice, LivingArea, LotSizeAcres, BedroomsTotal, BathroomsTotalInteger, DaysOnMarket, and YearBuilt
