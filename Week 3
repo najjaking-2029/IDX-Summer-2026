@@ -1,10 +1,5 @@
 """
-Weeks 2-3 Deliverable (Part 2) - Mortgage Rate Enrichment
-------------------------------------------------------------
-Author: Najja A. King
-Program: IDX Exchange Data Analyst Internship (Summer 2026, Group DA 39)
-
-WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+WHAT THIS SCRIPT DOES:
 Home buyers pay attention to mortgage rates -- when rates are high, fewer
 people buy homes. This script grabs the real, national 30-year mortgage
 rate for every week, turns it into a monthly average, and then attaches
