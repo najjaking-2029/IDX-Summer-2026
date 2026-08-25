@@ -1,5 +1,5 @@
 """
-WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+WHAT THIS SCRIPT DOES:
 This is the "tidy up the data" step. Raw data almost always has some messy
 parts -- dates stored as plain text instead of real dates, columns that are
 basically empty, and a few impossible values (like a home that sold for
