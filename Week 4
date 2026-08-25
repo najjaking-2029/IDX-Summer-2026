@@ -1,3 +1,23 @@
+"""
+WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
+This is the "tidy up the data" step. Raw data almost always has some messy
+parts -- dates stored as plain text instead of real dates, columns that are
+basically empty, and a few impossible values (like a home that sold for
+$0). This script fixes those four things, one at a time:
+
+1. Converts date columns from plain text into real datetime values, so
+   Python can compare and sort them correctly.
+2. Removes columns that are mostly empty and not useful for analysis
+   (identified back in the Week 2-3 missing value report).
+3. Makes sure number columns are actually stored as numbers, not text.
+4. Flags rows with impossible numeric values (like ClosePrice = 0) instead
+   of deleting them right away, so we keep a record of what got flagged
+   and why, then saves a clean copy with those rows removed.
+
+INPUT: sold_with_mortgage_rates.csv / listings_with_mortgage_rates.csv
+(the files produced by week3_mortgage_enrichment.py)
+"""
+
 import pandas as pd
 import os
 
