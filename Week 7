@@ -1,15 +1,16 @@
 """
 WHAT THIS SCRIPT DOES:
-This week is about finding outliers in the sold data. Basically some homes
-in here have prices/sizes/days on market that are so extreme they'd throw
+This week is about finding outliers in the sold data. Because some homes
+in here have prices/sizes/days on market that are so extreme, they'd throw
 off our averages if we don't deal with them (like one house selling for
-almost a billion dollars, that's obviously not a "normal" home sale lol).
+almost a billion dollars, that's obviously not a "normal" home sale).
 
 Using the IQR method the handbook gave us. Important thing - I'm NOT
 deleting rows here, just flagging them. Handbook says don't blindly remove
 outliers, so I'm keeping the full dataset with flags AND making a separate
 "clean" version with the flagged rows taken out, so both exist.
 """
+
 import pandas as pd
 import os
 
