@@ -1,3 +1,24 @@
+"""
+WHAT THIS SCRIPT DOES:
+Now that the data is cleaned (Weeks 4-5), this script builds the actual
+"market metrics" that power the Tableau dashboards later. Think of this as
+turning raw facts (a price, a date) into useful INSIGHTS (a ratio, a trend).
+
+It creates 6 new columns:
+1. Price Ratio            -- ClosePrice / OriginalListPrice
+2. Price Per Sq Ft (PPSF)  -- ClosePrice / LivingArea
+3. Year / Month / YrMo     -- pulled out of CloseDate, for time-series charts
+4. Close-to-Original-List Ratio -- same formula as #1 (the handbook lists
+   this as its own metric, so we create it as its own clearly-named column)
+5. Listing-to-Contract Days -- how many days between listing and accepted offer
+6. Contract-to-Close Days   -- how many days between accepted offer and closing
+
+Then it groups the data by County and by Property Subtype to show summary
+statistics for each segment -- this is the "Segment Analysis" part of the
+handbook.
+
+INPUT: sold_analysis_ready.csv (from week5_validation_checks.py)
+"""
 import pandas as pd
 import os
 
