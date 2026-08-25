@@ -1,3 +1,9 @@
+"""
+Weeks 2-3 Deliverable (Part 2) - Mortgage Rate Enrichment
+------------------------------------------------------------
+Author: Najja A. King
+Program: IDX Exchange Data Analyst Internship (Summer 2026, Group DA 39)
+
 WHAT THIS SCRIPT DOES, IN PLAIN WORDS:
 Home buyers pay attention to mortgage rates -- when rates are high, fewer
 people buy homes. This script grabs the real, national 30-year mortgage
@@ -6,7 +12,16 @@ rate for every week, turns it into a monthly average, and then attaches
 us later ask questions like "did homes sell slower in months when rates
 were higher?"
 
-
+STEPS:
+1. Download the weekly mortgage rate numbers from FRED (a free government
+   economic data website - no login or API key needed).
+2. Average the weekly numbers into one number per month.
+3. Create a matching "year_month" label on our Sold and Listing data so we
+   can line the two datasets up by month.
+4. Merge (attach) the monthly mortgage rate onto both datasets.
+5. Double check that every row got a rate attached (no blanks left over).
+6. Save both new, enriched files.
+"""
 
 import pandas as pd
 import os
